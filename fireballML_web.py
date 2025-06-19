@@ -328,8 +328,8 @@ def init_play_vs_ai_state():
         st.session_state.ai_player = copy.deepcopy(ai_master) if ai_master else None
 
 def page_play_vs_ai():
-    st.title("🔥 Fireball AI 🧙")
-    st.markdown("Play a strategic game against the AI. Defeat it by casting a winning spell!")
+    st.title("Fireball Machine-Learning Model")
+    st.markdown("Play a game against the ML Model!")
     
     init_play_vs_ai_state()
     game = st.session_state.game
@@ -345,7 +345,7 @@ def page_play_vs_ai():
 
     if game.game_over:
         if game.winner == "player1": st.success("🎉 You won! Congratulations!")
-        else: st.error("🤖 The AI won. Better luck next time!")
+        else: st.error("The AI won. Better luck next time!")
         if st.button("Play Again?"):
             init_play_vs_ai_state()
             st.rerun()
@@ -372,7 +372,7 @@ def page_play_vs_ai():
         for turn in reversed(st.session_state.turn_history): st.info(turn)
 
 def page_train_ai():
-    st.title("🤖 Train a New AI Model")
+    st.title("Train a New AI Model")
     st.info("This will train a new AI from scratch for 100,000 episodes and save it as `fireball_ai_model.pkl`.")
     if st.button("Start Standard Training", type="primary"):
         with st.spinner("Training in progress... This will take several minutes."):
@@ -385,7 +385,7 @@ def page_train_ai():
         st.rerun() # Rerun to load the new model
 
 def page_ai_vs_ai():
-    st.title("🤖 AI vs AI Demonstration")
+    st.title("AI vs AI Demonstration")
     st.info("Watch two instances of the trained AI play against each other.")
     if st.button("Start Demo", type="primary"):
         with st.spinner("Simulating game..."):
@@ -393,7 +393,7 @@ def page_ai_vs_ai():
             ai_vs_ai_demo(st_log_container=log_container)
 
 def page_evaluate_ai():
-    st.title("📊 Evaluate Current AI Model")
+    st.title("Evaluate Current AI Model")
     st.info("Simulate 10,000 games between the current AI and a completely random bot to gauge its performance.")
     if st.button("Start Evaluation", type="primary"):
         with st.spinner("Running simulations... This may take a moment."):
@@ -401,8 +401,8 @@ def page_evaluate_ai():
             run_evaluation_simulations(num_games=10000, st_log_container=log_container)
 
 def page_find_best_model():
-    st.title("🏆 Find the Best Possible Model")
-    st.warning("This is a very long process. It will train multiple AI models back-to-back and save only the one with the highest win rate.")
+    st.title("Find the Best Possible Model")
+    st.warning("This is a pretty tedious process. It will train multiple AI models back-to-back and save only the one with the highest win rate.")
     
     num_attempts = st.number_input("Number of training attempts", min_value=1, max_value=20, value=3)
     episodes = st.number_input("Episodes per attempt", min_value=1000, max_value=100000, value=50000, step=1000)
