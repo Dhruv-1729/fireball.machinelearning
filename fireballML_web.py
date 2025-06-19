@@ -344,10 +344,14 @@ def page_play_vs_ai():
     st.markdown("---")
 
     if game.game_over:
-        if game.winner == "player1": st.success("🎉 You won! Congratulations!")
+        if game.winner == "player1": st.success("You won!")
         else: st.error("The AI won. Better luck next time!")
         if st.button("Play Again?"):
-            init_play_vs_ai_state()
+            # Directly reset the session state instead of calling init function
+            st.session_state.game = FireballGame()
+            st.session_state.turn_history = []
+            ai_master = load_ai_model()
+            st.session_state.ai_player = copy.deepcopy(ai_master) if ai_master else None
             st.rerun()
     else:
         st.subheader("Choose your move:")
@@ -401,8 +405,8 @@ def page_evaluate_ai():
             run_evaluation_simulations(num_games=10000, st_log_container=log_container)
 
 def page_find_best_model():
-    st.title("Find the Best Possible Model")
-    st.warning("This is a pretty tedious process. It will train multiple AI models back-to-back and save only the one with the highest win rate.")
+    st.title("🏆 Find the Best Possible Model")
+    st.warning("This is a very tedious process. It will train multiple AI models back-to-back and save only the one with the highest win rate.")
     
     num_attempts = st.number_input("Number of training attempts", min_value=1, max_value=20, value=3)
     episodes = st.number_input("Episodes per attempt", min_value=1000, max_value=100000, value=50000, step=1000)
