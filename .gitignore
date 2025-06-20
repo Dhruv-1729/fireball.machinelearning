@@ -1,0 +1,27 @@
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.env
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Firebase credentials (if you have any other Firebase files)
+serviceAccountKey.json
+firebase-config.json
+
+# Model files (optional - these can be large)
+*.pkl
