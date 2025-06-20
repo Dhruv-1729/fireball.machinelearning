@@ -526,7 +526,7 @@ def page_1v1_fireball():
                 st.success(f"Turn {turn_number}: You chose **{my_actual_move}**, opponent chose **{opp_move}**")
                 
                 # Brief pause to show the result
-                time.sleep(4)
+                time.sleep(3)
                 st.rerun()
             else:
                 # Turn already processed, just show the result
