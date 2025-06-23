@@ -875,7 +875,7 @@ def page_statistics():
 
 # --- Main App ---
 def main():
-    st.set_page_config(page_title="Fireball AI", layout="centered")
+    st.set_page_config(page_title="Fireball AI", layout="centered", initial_sidebar_state="expanded")
     apply_styles()
 
     # Initialize session state variables
