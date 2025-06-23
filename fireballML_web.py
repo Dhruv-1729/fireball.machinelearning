@@ -70,7 +70,7 @@ def init_firebase():
         return firestore.client()
     except Exception as e:
         st.error(f"Failed to initialize Firebase: {e}")
-        st.warning("Firebase connection is required for 1v1 mode. Please ensure your `secrets.toml` is configured correctly.")
+        st.warning("Firebase connection is required for 1v1 mode and statistics. Please ensure your `secrets.toml` is configured correctly.")
         return None
 
 # Initialize Firebase and get the database client
@@ -198,7 +198,57 @@ class FireballQLearning:
             with open(filename, 'rb') as f: self.q_table = defaultdict(lambda: defaultdict(float), pickle.load(f))
             return True
         except FileNotFoundError: return False
-
+class AdaptiveFireballAI(FireballQLearning):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.human_patterns = defaultdict(int)
+        self.adaptation_weight = 0.3
+        
+    def analyze_human_pattern(self, opp_history):
+        """Analyze opponent's move patterns"""
+        if len(opp_history) >= 3:
+            pattern = "_".join(opp_history[-3:])
+            self.human_patterns[pattern] += 1
+    
+    def predict_human_move(self, opp_history, legal_moves):
+        """Predict human's next move based on patterns"""
+        if len(opp_history) >= 2:
+            recent_pattern = "_".join(opp_history[-2:])
+            # Look for patterns that start with this sequence
+            matching_patterns = {p: count for p, count in self.human_patterns.items() 
+                               if p.startswith(recent_pattern) and count > 2}
+            
+            if matching_patterns:
+                # Get the most common next move
+                next_moves = [p.split('_')[-1] for p in matching_patterns.keys()]
+                predicted = max(set(next_moves), key=next_moves.count)
+                if predicted in legal_moves:
+                    return predicted
+        return None
+    
+    def choose_action(self, state, legal_moves, training=True, opp_history=None):
+        """Enhanced action selection with human pattern consideration"""
+        base_action = super().choose_action(state, legal_moves, training)
+        
+        if opp_history and len(opp_history) >= 2:
+            predicted_human_move = self.predict_human_move(opp_history, 
+                                   FireballQLearning.get_legal_moves(10))  # Assume max charges for prediction
+            
+            if predicted_human_move:
+                # Choose counter-move
+                counter_moves = {
+                    "charge": ["fireball", "iceball"],
+                    "fireball": ["iceball", "shield"],
+                    "iceball": ["shield", "megaball"],
+                    "shield": ["charge", "fireball"],
+                    "megaball": ["megaball"]
+                }
+                
+                counters = [m for m in counter_moves.get(predicted_human_move, []) if m in legal_moves]
+                if counters and random.random() < self.adaptation_weight:
+                    return random.choice(counters)
+        
+        return base_action
 class FireballGame:
     def __init__(self): self.reset_game()
     def reset_game(self): self.player_charges, self.comp_charges, self.game_over, self.winner = 0, 0, False, None
@@ -223,7 +273,6 @@ class RandomBotController:
     def choose_move(self, my_charges, legal_moves): return random.choice(legal_moves) if legal_moves else "charge"
 
 # --- Training and Evaluation Functions ---
-# (These functions remain largely the same, but could be enhanced with the new 1v1 data)
 def train_ai(episodes=100000, self_play_ratio=0.4, st_log_container=None):
     # This function can now be enhanced to also train from data collected in Firestore
     ai = FireballQLearning(learning_rate=0.1, discount_factor=0.9, epsilon=0.5, lambda_val=0.9)
@@ -288,8 +337,17 @@ def init_play_vs_ai_state():
         st.session_state.page = 'Play vs AI'
         st.session_state.game = FireballGame()
         st.session_state.turn_history = []
-        ai_master = load_ai_model()
-        st.session_state.ai_player = copy.deepcopy(ai_master) if ai_master else None
+        
+        # Load adaptive AI
+        base_ai = load_ai_model()
+        if base_ai:
+            adaptive_ai = AdaptiveFireballAI(epsilon=0)
+            adaptive_ai.q_table = base_ai.q_table
+            # Auto-learn from recent human data
+            auto_learn_from_human_data(adaptive_ai)
+            st.session_state.ai_player = adaptive_ai
+        else:
+            st.session_state.ai_player = None
 
 def page_play_vs_ai():
     st.title("Fireball Machine-Learning Model")
@@ -304,11 +362,30 @@ def page_play_vs_ai():
     col2.metric("AI Charges", game.comp_charges)
     st.markdown("---")
     if game.game_over:
-        if game.winner == "player1": st.success("You won!")
-        else: st.error("The AI won. Better luck next time!")
+        winner = ""
+        if game.winner == "player1":
+            st.success("You won!")
+            winner = "human"
+        else:
+            st.error("The AI won. Better luck next time!")
+            winner = "ai"
+
+        # Log game result to Firestore for statistics
+        if db and 'logged_game' not in st.session_state:
+            try:
+                db.collection("ai_vs_human_matches").add({
+                    "winner": winner,
+                    "turns": len(st.session_state.turn_history),
+                    "timestamp": firestore.SERVER_TIMESTAMP
+                })
+                st.session_state.logged_game = True # Ensure we only log once
+            except Exception as e:
+                st.warning(f"Could not log game statistics: {e}")
+
         if st.button("Play Again?"):
             st.session_state.game = FireballGame()
             st.session_state.turn_history = []
+            st.session_state.pop('logged_game', None) # Reset log flag
             ai_master = load_ai_model()
             st.session_state.ai_player = copy.deepcopy(ai_master) if ai_master else None
             st.rerun()
@@ -331,7 +408,22 @@ def page_play_vs_ai():
         st.markdown("---")
         st.subheader("Turn History")
         for turn in reversed(st.session_state.turn_history): st.info(turn)
-
+def load_turn_history_from_firestore(match_id):
+    """Load existing turn history from Firestore training data"""
+    if not db:
+        return []
+    
+    try:
+        docs = db.collection('training_data').where('match_id', '==', match_id).order_by('turn').stream()
+        history = []
+        for doc in docs:
+            data = doc.to_dict()
+            turn_text = f"Turn {data['turn']}: Player 1 chose **{data['p1_move']}**, Player 2 chose **{data['p2_move']}**"
+            history.append(turn_text)
+        return history
+    except Exception as e:
+        print(f"Error loading turn history: {e}")
+        return []
 def page_guide():
     st.title("How to Play Fireball")
     st.markdown('<div class="back-button">', unsafe_allow_html=True)
@@ -339,38 +431,90 @@ def page_guide():
         st.session_state.page = "Play vs AI"
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+    
     st.markdown("""
-    **Charge**: Gets "energy" to use attack moves.
-    **Shield**: Shields you from any attack except Megaball.
-    **Fireball**: Requires 1 charge to use. You beat the opponent if they use Charge.
-    **Iceball**: Requires 2 charges to use. It can beat Fireball and Charge.
-    **Megaball**: Requires 5 charges. When you use it you instantly win, unless your opponent uses Megaball too.
+    ## Game Objective
+    Use strategy to beat your opponent using different moves.
+    
+    ## Available Moves
+    
+    **Charge** Gains 1 "charge". This is the way to build up power for attacks. Always available and costs nothing.
+    
+    **Shield** Protects you from Fireball and Iceball attacks. Cannot block Megaball. Always available and costs nothing.
+    
+    **Fireball** A basic attack that defeats opponents that use Charge. Blocked by Shield. You need at least 1 charge to use this.
+    
+    **Iceball** A stronger attack that defeats both Charge and Fireball. Blocked by Shield. You need at least 2 charges to use this.
+    
+    **Megaball** The best attack. Instantly wins the game unless your opponent also uses Megaball (which cancel each other out). Cannot be blocked by Shield. You need at least 5 charges to use this.
+    
+    ## Basic Strategy 
+    
+    - **Build up charges** early to unlock powerful attacks
+    - **Use Shield wisely** to predict when your opponent plays an attack
+    - **Watch your opponent's charges** - if they have 5+, they basically win.
+    - **Mix up your patterns** - don't be predictable!
+    
+    ## AI
+    The computer opponent is a machine learning model that has been trained through:
+    - **Training**: Playing thousands of games against itself and random bots
+    - **Pattern recognition**: Learning to predict and counter human strategies  
+    - **Adaptive learning**: Continuously improving from real player data
     """)
-    st.markdown("---")
-    st.info("The computer is a ML Model that has trained from playing against itself and other bots. The goal is to eventually train it on real player data from 1v1 matches!")
 
 # Replace the page_1v1_fireball function with this fixed version
-
 def page_1v1_fireball():
     st.title("1v1 Fireball")
     if not db:
         st.error("Cannot connect to the game server. 1v1 mode is disabled.")
         return
 
-    # Initialize player ID and state for 1v1 mode
+    # Initialize player ID and username
     if 'player_id' not in st.session_state:
         st.session_state.player_id = str(uuid.uuid4())
+    if 'username' not in st.session_state:
+        st.session_state.username = None
     if 'match_id' not in st.session_state:
         st.session_state.match_id = None
     
+    # Username selection
+    if not st.session_state.username:
+        st.subheader("Choose Your Username")
+        with st.form("username_form"):
+            username = st.text_input(" ", max_chars=15)
+            if st.form_submit_button("Continue"):
+                if 1 <= len(username) <= 15:
+                    st.session_state.username = username
+                    st.rerun()
+                else:
+                    st.error("Username must be 1-15 characters long.")
+        return
+    
     player_id = st.session_state.player_id
+    
+    # Get current player count
+    try:
+        pending_matches = db.collection("matches").where("status", "==", "pending").get()
+        searching_players = len(pending_matches)
+        if st.session_state.get("match_status") == "searching":
+            searching_players += 1
+    except:
+        searching_players = 0
     
     # If not in a match, show the matchmaking UI
     if not st.session_state.match_id:
-        st.subheader("Find a real-time match against another player.")
-        if st.button("Find Match", type="primary", use_container_width=True):
-            st.session_state.match_status = "searching"
-            st.rerun()
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader(f"Welcome, {st.session_state.username}!")
+            st.write("Play a live 1v1 game against another player.")
+            if st.button("Find Match", type="primary", use_container_width=True):
+                st.session_state.match_status = "searching"
+                st.session_state.turn_history_1v1 = []
+                st.rerun()
+        
+        with col2:
+            st.info(f"🔍 {searching_players} players searching for match currently...")
 
         if st.session_state.get("match_status") == "searching":
             with st.spinner("Finding players..."):
@@ -382,6 +526,7 @@ def page_1v1_fireball():
                     st.session_state.match_id = match.id
                     db.collection("matches").document(match.id).update({
                         "players": firestore.ArrayUnion([player_id]),
+                        f"player_usernames.{player_id}": st.session_state.username,
                         "status": "active"
                     })
                 else: # Create a new match
@@ -389,6 +534,7 @@ def page_1v1_fireball():
                     st.session_state.match_id = new_match_ref.id
                     new_match_ref.set({
                         "players": [player_id],
+                        "player_usernames": {player_id: st.session_state.username},  
                         "status": "pending",
                         "game_state": {"p1_charges": 0, "p2_charges": 0, "turn": 1, "moves": {}},
                         "game_over": False,
@@ -437,127 +583,148 @@ def page_1v1_fireball():
         my_charges = game_state.get("p1_charges", 0) if is_p1 else game_state.get("p2_charges", 0)
         opp_charges = game_state.get("p2_charges", 0) if is_p1 else game_state.get("p1_charges", 0)
         
-        st.subheader(f"Match found! You are Player {player_index + 1}")
+        player_usernames = match_data.get("player_usernames", {})
+        my_username = player_usernames.get(player_id, f"Player {player_index + 1}")
+        opp_id = players[1] if is_p1 else players[0]
+        opp_username = player_usernames.get(opp_id, f"Player {2 if is_p1 else 1}")
+
+        st.subheader(f"Match found! You are {my_username}")
         
         col1, col2 = st.columns(2)
-        col1.metric("Your Charges", my_charges)
-        col2.metric("Opponent's Charges", opp_charges)
+        col1.metric(f"{my_username}'s Charges", my_charges)
+        col2.metric(f"{opp_username}'s Charges", opp_charges)
         st.markdown("---")
         
         turn_number = game_state.get("turn", 1)
         moves_this_turn = game_state.get("moves", {}).get(str(turn_number), {})
         my_move = moves_this_turn.get(player_id)
 
+        if 'turn_history_1v1' not in st.session_state or st.session_state.match_id not in st.session_state.get('current_match_id_for_history', ''):
+            st.session_state.turn_history_1v1 = load_turn_history_from_firestore(st.session_state.match_id)
+            st.session_state.current_match_id_for_history = st.session_state.match_id
+
+        # Game over check
         if match_data.get("game_over"):
             winner_id = match_data.get("winner")
             if winner_id == player_id: 
-                st.success("You won!")
+                st.success(f"{my_username} won!")
             elif winner_id: 
-                st.error("You lost!")
-            else: 
+                winner_username = player_usernames.get(winner_id, "Unknown Player")
+                st.error(f"{winner_username} won!")
+            else:
                 st.info("It's a draw!")
+            
             if st.button("Find New Match"):
                 st.session_state.match_id = None
+                st.session_state.turn_history_1v1 = []
                 st.rerun()
         
         # Check if both players have made moves and process the turn
         elif len(moves_this_turn) == 2:
-            # Both players have moved, process the turn
             p1_id, p2_id = players[0], players[1]
             p1_move = moves_this_turn[p1_id]
             p2_move = moves_this_turn[p2_id]
             
-            # Check if this turn has already been processed
-            turn_key = f'processed_turn_{turn_number}_{st.session_state.match_id}'
-            if not st.session_state.get(turn_key, False):
-                # Use a local game instance to calculate results
-                temp_game = FireballGame()
-                temp_game.player_charges = game_state.get("p1_charges", 0)
-                temp_game.comp_charges = game_state.get("p2_charges", 0)
-                result = temp_game.execute_turn(p1_move, p2_move)
-
-                # --- ML DATA COLLECTION ---
+            if not game_state.get('turn_processed_for_turn', {}).get(str(turn_number)):
                 try:
-                    db.collection("training_data").add({
-                        "match_id": st.session_state.match_id,
-                        "turn": turn_number,
-                        "p1_id": p1_id,
-                        "p2_id": p2_id,
-                        "p1_charges_before": game_state.get("p1_charges", 0),
-                        "p2_charges_before": game_state.get("p2_charges", 0),
-                        "p1_move": p1_move,
-                        "p2_move": p2_move,
-                        "result": result,
-                        "timestamp": firestore.SERVER_TIMESTAMP
-                    })
+                    @firestore.transactional
+                    def process_turn_transaction(transaction, match_ref):
+                        match_snapshot = match_ref.get(transaction=transaction)
+                        current_data = match_snapshot.to_dict()
+                        current_game_state = current_data.get("game_state", {})
+                        
+                        if current_game_state.get('turn_processed_for_turn', {}).get(str(turn_number)):
+                            return None
+                        
+                        temp_game = FireballGame()
+                        temp_game.player_charges = current_game_state.get("p1_charges", 0)
+                        temp_game.comp_charges = current_game_state.get("p2_charges", 0)
+                        result = temp_game.execute_turn(p1_move, p2_move)
+                        
+                        new_game_state = {
+                            "p1_charges": temp_game.player_charges,
+                            "p2_charges": temp_game.comp_charges,
+                            "turn": turn_number + 1,
+                            "moves": {},
+                            "turn_processed_for_turn": {str(turn_number): True}
+                        }
+                        
+                        update_payload = {"game_state": new_game_state}
+                        
+                        if temp_game.game_over:
+                            update_payload["game_over"] = True
+                            update_payload["end_timestamp"] = firestore.SERVER_TIMESTAMP
+                            if temp_game.winner == "player1": 
+                                update_payload["winner"] = p1_id
+                            elif temp_game.winner == "player2": 
+                                update_payload["winner"] = p2_id
+                            else:
+                                update_payload["winner"] = None
+                        
+                        transaction.update(match_ref, update_payload)
+                        return result
+                    
+                    transaction = db.transaction()
+                    result = process_turn_transaction(transaction, match_ref)
+                    
+                    if result is not None:
+                        try:
+                            db.collection("training_data").add({
+                                "match_id": st.session_state.match_id,
+                                "turn": turn_number,
+                                "p1_id": p1_id,
+                                "p2_id": p2_id,
+                                "p1_charges_before": game_state.get("p1_charges", 0),
+                                "p2_charges_before": game_state.get("p2_charges", 0),
+                                "p1_move": p1_move,
+                                "p2_move": p2_move,
+                                "result": result,
+                                "timestamp": firestore.SERVER_TIMESTAMP
+                            })
+                        except Exception as e:
+                            st.warning(f"Failed to save training data: {e}")
+                        
+                        p1_username = player_usernames.get(p1_id, "Player 1")
+                        p2_username = player_usernames.get(p2_id, "Player 2")
+                        turn_result_text = f"Turn {turn_number}: {p1_username} chose **{p1_move}**, {p2_username} chose **{p2_move}**"
+                        st.session_state.turn_history_1v1.append(turn_result_text)
+                        st.success(turn_result_text)
+                    
                 except Exception as e:
-                    st.warning(f"Failed to save training data: {e}")
-
-                # Prepare the update payload
-                new_game_state = {
-                    "p1_charges": temp_game.player_charges,
-                    "p2_charges": temp_game.comp_charges,
-                    "turn": turn_number + 1,
-                    "moves": {}  # Clear moves for next turn
-                }
-                
-                update_payload = {"game_state": new_game_state}
-                
-                if temp_game.game_over:
-                    update_payload["game_over"] = True
-                    if temp_game.winner == "player1": 
-                        update_payload["winner"] = p1_id
-                    elif temp_game.winner == "player2": 
-                        update_payload["winner"] = p2_id
-                    else:
-                        update_payload["winner"] = None  # Draw
-
-                # Update the match in Firestore
-                try:
-                    match_ref.update(update_payload)
-                    st.session_state[turn_key] = True
-                except Exception as e:
-                    st.error(f"Failed to update match: {e}")
+                    st.error(f"Failed to process turn: {e}")
                     return
                 
-                # Show what happened this turn
-                opp_move = p2_move if is_p1 else p1_move
-                my_actual_move = p1_move if is_p1 else p2_move
-                st.success(f"Turn {turn_number}: You chose **{my_actual_move}**, opponent chose **{opp_move}**")
-                
-                # Brief pause to show the result
-                time.sleep(3)
+                time.sleep(1.5)
                 st.rerun()
             else:
-                # Turn already processed, just show the result
-                opp_move = p2_move if is_p1 else p1_move
-                my_actual_move = p1_move if is_p1 else p2_move
-                st.info(f"Turn {turn_number}: You chose **{my_actual_move}**, opponent chose **{opp_move}**")
                 st.info("Processing turn...")
                 time.sleep(1)
                 st.rerun()
-        
+
         elif my_move:
-            st.info("You chose your move. Waiting for opponent...")
-            # Auto-refresh to check for opponent's move
+            st.info(f"You chose **{my_move}**. Waiting for {opp_username}...")
             time.sleep(2)
             st.rerun()
+        
         else:
-            # Player hasn't made a move yet
             st.subheader("Choose your move:")
             legal_moves = FireballQLearning.get_legal_moves(my_charges)
             st.markdown(get_button_css(legal_moves), unsafe_allow_html=True)
             cols = st.columns(len(legal_moves))
             for i, move in enumerate(legal_moves):
                 if cols[i].button(move.capitalize(), use_container_width=True):
-                    # Record the move in Firestore
                     try:
-                        # Use dot notation for nested field update
                         move_path = f"game_state.moves.{turn_number}.{player_id}"
                         match_ref.update({move_path: move})
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to record move: {e}")
+
+        if st.session_state.get('turn_history_1v1'):
+            st.markdown("---")
+            st.subheader("Turn History")
+            for turn in reversed(st.session_state.turn_history_1v1):
+                st.info(turn)
 # --- Admin Panel Pages ---
 def page_admin_panel():
     st.title("Admin Panel")
@@ -565,11 +732,35 @@ def page_admin_panel():
     admin_pages = {
         "Train AI": page_train_ai,
         "Collect Training Data": page_collect_training_data,
-        # Add other admin pages here
+        "Statistics": page_statistics,
     }
     choice = st.radio("Select Tool", list(admin_pages.keys()))
     admin_pages[choice]()
-
+def auto_learn_from_human_data(ai_instance, limit=1000):
+    """Automatically learn from recent human vs human games"""
+    if not db:
+        return
+    
+    try:
+        docs = db.collection('training_data').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit).stream()
+        
+        for doc in docs:
+            data = doc.to_dict()
+            p1_state = ai_instance.get_state(data['p1_charges_before'], data['p2_charges_before'])
+            p2_state = ai_instance.get_state(data['p2_charges_before'], data['p1_charges_before'])
+            
+            if data['result'] == 'player1':
+                reward_p1, reward_p2 = 10, -10
+            elif data['result'] == 'player2':
+                reward_p1, reward_p2 = -10, 10
+            else:
+                reward_p1, reward_p2 = 0, 0
+            
+            ai_instance.q_table[p1_state][data['p1_move']] += 0.1 * reward_p1
+            ai_instance.q_table[p2_state][data['p2_move']] += 0.1 * reward_p2
+            
+    except Exception as e:
+        print(f"Auto-learning error: {e}")
 def page_train_ai():
     st.header("Train a New AI Model")
     st.info("This will train a new AI from scratch for 100,000 episodes and save it as `fireball_ai_model.pkl`.")
@@ -582,6 +773,7 @@ def page_train_ai():
         st.info("The page will now reload to use the new model.")
         time.sleep(3)
         st.rerun()
+
 
 def page_collect_training_data():
     st.header("ML Data from 1v1 Matches")
@@ -600,6 +792,86 @@ def page_collect_training_data():
         st.write("No training data found yet. Play some 1v1 games to collect data!")
     else:
         st.dataframe(data)
+
+def page_statistics():
+    st.title("Live Game Statistics")
+    if not db:
+        st.error("Firestore not connected.")
+        return
+
+    # --- AI vs. Human Statistics ---
+    st.header("AI vs. Human Performance")
+    with st.spinner("Calculating AI performance..."):
+        try:
+            matches_ref = db.collection("ai_vs_human_matches").stream()
+            matches = [doc.to_dict() for doc in matches_ref]
+            
+            if not matches:
+                st.info("No AI vs. Human games have been played yet.")
+            else:
+                total_games = len(matches)
+                ai_wins = sum(1 for m in matches if m['winner'] == 'ai')
+                total_turns = sum(m.get('turns', 0) for m in matches)
+                
+                win_rate = (ai_wins / total_games) * 100 if total_games > 0 else 0
+                avg_length = total_turns / total_games if total_games > 0 else 0
+                
+                col1, col2 = st.columns(2)
+                col1.metric("AI Win Rate vs. Humans", f"{win_rate:.2f}%", f"{ai_wins} wins in {total_games} games")
+                col2.metric("Average AI Match Length", f"{avg_length:.2f} rounds")
+
+        except Exception as e:
+            st.error(f"Could not load AI statistics: {e}")
+
+    st.markdown("---")
+
+    # --- 1v1 Match History ---
+    st.header("Recent 1v1 Match Summary")
+    with st.spinner("Fetching recent 1v1 matches..."):
+        try:
+            # Query the last 45 completed matches
+            matches_ref = db.collection("matches") \
+                            .where("status", "==", "active") \
+                            .where("game_over", "==", True) \
+                            .order_by("end_timestamp", direction=firestore.Query.DESCENDING) \
+                            .limit(45) \
+                            .stream()
+            
+            recent_matches = list(matches_ref)
+
+            if not recent_matches:
+                st.info("No completed 1v1 matches found.")
+            else:
+                st.write(f"Displaying the last {len(recent_matches)} completed matches.")
+                
+                for match_doc in recent_matches:
+                    match = match_doc.to_dict()
+                    game_state = match.get('game_state', {})
+                    usernames = match.get('player_usernames', {})
+                    winner_id = match.get('winner')
+                    
+                    winner_username = "Draw"
+                    if winner_id and winner_id in usernames:
+                        winner_username = usernames[winner_id]
+                    elif winner_id:
+                        winner_username = "Unknown Player"
+
+                    p1_id, p2_id = match['players'][0], match['players'][1]
+                    p1_username = usernames.get(p1_id, "Player 1")
+                    p2_username = usernames.get(p2_id, "Player 2")
+
+                    p1_charges = game_state.get('p1_charges', 'N/A')
+                    p2_charges = game_state.get('p2_charges', 'N/A')
+                    # The turn number is incremented before the game ends, so subtract 1
+                    rounds = game_state.get('turn', 1) - 1
+
+                    summary = f"**Winner:** {winner_username} ({rounds} rounds) - **{p1_username}** ({p1_charges} charges) vs **{p2_username}** ({p2_charges} charges)"
+                    st.markdown(f"- {summary}")
+
+        except Exception as e:
+            st.error(f"Could not load 1v1 match history: {e}")
+            st.warning("This may be due to a missing Firestore composite index. Please create one for the 'matches' collection with fields: status (ASC), game_over (ASC), and end_timestamp (DESC).")
+
 
 # --- Main App ---
 def main():
@@ -643,31 +915,27 @@ def main():
                 else:
                     st.error("Incorrect password.")
 
+    # Remove the condition that hides the sidebar
     st.sidebar.title("Game Menu")
-    
+
     st.sidebar.markdown('<div class="how-to-play-button">', unsafe_allow_html=True)
     if st.sidebar.button("How to Play", use_container_width=True):
         st.session_state.page = "Guide"
         st.rerun()
     st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
-    # Sidebar navigation
+    # Always show navigation options
     page_options = ["Play vs AI", "1v1 Fireball"]
     if st.session_state.admin_mode:
         page_options.append("Admin Panel")
 
-    # If current page is invalid (e.g., admin turned off), default to home
-    if st.session_state.page not in page_options and st.session_state.page != "Guide":
-        st.session_state.page = "Play vs AI"
-
-    # Display radio buttons for navigation
+    # Always display radio buttons
     if st.session_state.page != "Guide":
-        current_index = page_options.index(st.session_state.page)
+        current_index = page_options.index(st.session_state.page) if st.session_state.page in page_options else 0
         selected_page = st.sidebar.radio("Choose an option", page_options, index=current_index)
         if selected_page != st.session_state.page:
             st.session_state.page = selected_page
             st.rerun()
-
     # Page routing
     page_map = {
         "Play vs AI": page_play_vs_ai,
