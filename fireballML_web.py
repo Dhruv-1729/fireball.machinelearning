@@ -798,7 +798,6 @@ def page_statistics():
     if not db:
         st.error("Firestore not connected.")
         return
-    # ADD THIS CODE BLOCK inside the page_statistics() function
 
     st.markdown("---")
     st.header("Website Traffic")
@@ -836,6 +835,7 @@ def page_statistics():
             st.error(f"Could not load AI statistics: {e}")
 
     st.markdown("---")
+
 
     # --- 1v1 Match History ---
     st.header("Recent 1v1 Match Summary")
