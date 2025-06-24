@@ -798,6 +798,18 @@ def page_statistics():
     if not db:
         st.error("Firestore not connected.")
         return
+    # ADD THIS CODE BLOCK inside the page_statistics() function
+
+    st.markdown("---")
+    st.header("Website Traffic")
+    with st.spinner("Counting unique visitors..."):
+        try:
+            # Get all documents in the collection. The number of documents is the count.
+            visitors_ref = db.collection("unique_visitors").stream()
+            unique_visitor_count = len(list(visitors_ref))
+            st.metric("Unique Visitors (Sessions)", unique_visitor_count)
+        except Exception as e:
+            st.error(f"Could not load visitor statistics: {e}")
 
     # --- AI vs. Human Statistics ---
     st.header("AI vs. Human Performance")
@@ -883,7 +895,22 @@ def main():
         st.session_state.admin_mode = False
     if 'page' not in st.session_state:
         st.session_state.page = "Play vs AI"
+    if db and 'session_logged' not in st.session_state:
+        try:
+            from streamlit.runtime.scriptrunner import get_script_run_ctx
+            ctx = get_script_run_ctx()
+            session_id = ctx.session_id
 
+            # Use the session_id as the document ID.
+            # .set() with merge=True will create the doc if it doesn't exist
+            # and do nothing if it does. This is an efficient way to track uniques.
+            db.collection("unique_visitors").document(session_id).set(
+                {"first_visit": firestore.SERVER_TIMESTAMP}, merge=True
+            )
+            st.session_state.session_logged = True
+        except Exception as e:
+            # Silently fail on the backend if something goes wrong
+            print(f"Could not log unique visitor: {e}")
     # Admin Mode Button - Updated Logic
     st.markdown('<div class="admin-button">', unsafe_allow_html=True)
     button_label = "Exit Admin Mode" if st.session_state.admin_mode else "Admin Options"
