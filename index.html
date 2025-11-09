@@ -1,15 +1,14 @@
 <!DOCTYPE html>
 
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fireball Machine Learning Model</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
         .loader {
@@ -26,22 +25,27 @@
         }
     </style>
 </head>
-<body class="bg-gray-950 text-gray-200 font-sans">
+<body class="bg-gray-950 text-gray-200 font-sans min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
         const { createRoot } = ReactDOM;
 
-        // Lucide icon component wrapper
-        const Icon = ({ name, ...props }) => {
-            useEffect(() => {
-                lucide.createIcons();
-            });
-            return React.createElement('i', {
-                'data-lucide': name,
-                ...props
-            });
+        // Simple icon component using emoji fallbacks
+        const Icon = ({ name, className = "" }) => {
+            const icons = {
+                rocket: "🚀",
+                brain: "🧠",
+                swords: "⚔️",
+                "bar-chart-3": "📊",
+                zap: "⚡",
+                shield: "🛡️",
+                flame: "🔥",
+                snowflake: "❄️",
+                bomb: "💣"
+            };
+            return <span className={className}>{icons[name] || "•"}</span>;
         };
 
         const GameLogic = {
@@ -64,49 +68,12 @@
                     <div className="w-full max-w-4xl mx-auto flex justify-between items-center">
                         <div className="flex items-center space-x-3">
                             <div className="p-2 bg-gray-800 rounded-lg">
-                                <Icon name="rocket" className="w-8 h-8 text-emerald-400" />
+                                <Icon name="rocket" className="text-3xl" />
                             </div>
                             <h1 className="text-3xl font-bold text-white">Fireball AI</h1>
                         </div>
                     </div>
                 </header>
-            );
-        }
-
-        function App() {
-            const [page, setPage] = useState("playAI");
-
-            return (
-                <div className="min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
-                    <Header />
-                    
-                    <nav className="flex space-x-2 bg-gray-900 p-2 rounded-lg my-6">
-                        <NavButton
-                            icon="brain"
-                            label="Play vs AI"
-                            isActive={page === "playAI"}
-                            onClick={() => setPage("playAI")}
-                        />
-                        <NavButton
-                            icon="swords"
-                            label="Play 1v1"
-                            isActive={page === "play1v1"}
-                            onClick={() => setPage("play1v1")}
-                        />
-                        <NavButton
-                            icon="bar-chart-3"
-                            label="Stats"
-                            isActive={page === "stats"}
-                            onClick={() => setPage("stats")}
-                        />
-                    </nav>
-
-                    <main className="w-full max-w-3xl">
-                        {page === "playAI" && <PlayAIPage />}
-                        {page === "play1v1" && <Play1v1Page />}
-                        {page === "stats" && <StatsPage />}
-                    </main>
-                </div>
             );
         }
 
@@ -120,9 +87,96 @@
                             : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                     }`}
                 >
-                    <Icon name={icon} className="w-5 h-5" />
+                    <Icon name={icon} className="text-xl" />
                     <span>{label}</span>
                 </button>
+            );
+        }
+
+        function ChargeDisplay({ playerCharges, oppCharges, p1Label = "Your", p2Label = "Opponent" }) {
+            return (
+                <div className="flex justify-around items-center bg-gray-950 p-4 rounded-lg mb-6 border border-gray-700">
+                    <div className="text-center">
+                        <p className="text-lg font-semibold text-cyan-400">{p1Label} Charges</p>
+                        <p className="text-5xl font-bold text-white">{playerCharges}</p>
+                    </div>
+                    <div className="h-16 w-px bg-gray-700"></div>
+                    <div className="text-center">
+                        <p className="text-lg font-semibold text-emerald-400">{p2Label} Charges</p>
+                        <p className="text-5xl font-bold text-white">{oppCharges}</p>
+                    </div>
+                </div>
+            );
+        }
+
+        function MoveSelector({ legalMoves, onMoveSelect, disabled }) {
+            const moveIcons = {
+                charge: { icon: "zap", color: "text-yellow-400" },
+                shield: { icon: "shield", color: "text-blue-400" },
+                fireball: { icon: "flame", color: "text-red-500" },
+                iceball: { icon: "snowflake", color: "text-cyan-300" },
+                megaball: { icon: "bomb", color: "text-purple-400" },
+            };
+
+            return (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {legalMoves.map(move => {
+                        const { icon, color } = moveIcons[move];
+                        return (
+                            <button
+                                key={move}
+                                onClick={() => onMoveSelect(move)}
+                                disabled={disabled}
+                                className={`flex flex-col items-center justify-center p-6 bg-gray-800 rounded-lg border border-gray-700 text-white font-semibold
+                                    hover:bg-gray-700 hover:border-gray-600 transition-all duration-200
+                                    focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-emerald-400
+                                    disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                <Icon name={icon} className={`text-4xl ${color} mb-2`} />
+                                <span>{move.charAt(0).toUpperCase() + move.slice(1)}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            );
+        }
+
+        function EndGameDisplay({ winner, onPlayAgain }) {
+            const isPlayerWin = winner === 'player1' || winner === 'human';
+            
+            return (
+                <div className="text-center p-6">
+                    <h3 className={`text-4xl font-bold ${isPlayerWin ? 'text-emerald-400' : 'text-red-500'}`}>
+                        {isPlayerWin ? "You Won! 🎉" : "You Lost! 😢"}
+                    </h3>
+                    <button
+                        onClick={onPlayAgain}
+                        className="mt-6 px-6 py-3 bg-gradient-to-r from-emerald-400 to-cyan-400 text-gray-950 font-bold rounded-lg text-lg hover:opacity-90 transition-opacity"
+                    >
+                        Play Again
+                    </button>
+                </div>
+            );
+        }
+
+        function HistoryDisplay({ history }) {
+            if (history.length === 0) return null;
+            
+            return (
+                <div className="mt-8">
+                    <h3 className="text-xl font-semibold mb-4">Turn History</h3>
+                    <div className="space-y-3 max-h-60 overflow-y-auto p-4 bg-gray-950 rounded-lg border border-gray-700">
+                        {history.map((turn, i) => (
+                            <div key={i} className="flex justify-between items-center text-sm p-3 bg-gray-800 rounded">
+                                <div>
+                                    <p>You played <span className="font-bold text-cyan-400">{turn.player}</span></p>
+                                    <p>Opponent played <span className="font-bold text-emerald-400">{turn.ai}</span></p>
+                                </div>
+                                <span className="font-semibold text-gray-300">{turn.result}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             );
         }
 
@@ -170,7 +224,7 @@
                     ]);
 
                 } catch (err) {
-                    setError('Failed to connect to AI backend. Please ensure the API is deployed.');
+                    setError('Failed to connect to AI backend. Please ensure the API is deployed and model.pkl exists.');
                     console.error(err);
                 }
                 setLoading(false);
@@ -190,7 +244,7 @@
                     {error && (
                         <div className="my-4 p-3 bg-red-900 border border-red-700 text-red-200 rounded-lg">
                             <p className="font-semibold">Backend Error</p>
-                            <p>{error}</p>
+                            <p className="text-sm">{error}</p>
                         </div>
                     )}
                     
@@ -204,6 +258,12 @@
                         />
                     )}
                     
+                    {loading && (
+                        <div className="flex justify-center mt-4">
+                            <div className="loader"></div>
+                        </div>
+                    )}
+                    
                     <HistoryDisplay history={history} />
                 </div>
             );
@@ -211,67 +271,42 @@
 
         function Play1v1Page() {
             const [username, setUsername] = useState("");
-            const [matchId, setMatchId] = useState(null);
-            const [error, setError] = useState(null);
-            const [loading, setLoading] = useState(false);
-            
-            const handleFindMatch = async () => {
-                if (!username) {
-                    setError("Please enter a username.");
-                    return;
-                }
-                setLoading(true);
-                setError(null);
-                
-                try {
-                    const response = await fetch('/api/matchmaking', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username }),
-                    });
-                    const data = await response.json();
-                    setMatchId(data.matchId);
-                } catch (err) {
-                    setError("1v1 matchmaking backend not yet connected. Coming soon!");
-                }
-                setLoading(false);
-            };
+            const [error, setError] = useState("1v1 matchmaking backend not yet connected. Coming soon!");
             
             return (
                 <div className="bg-gray-900 p-6 rounded-lg shadow-xl border border-gray-700">
                     <h2 className="text-2xl font-bold mb-4">Play 1v1 vs Another Player</h2>
                     
-                    {error && (
-                        <div className="my-4 p-3 bg-red-900 border border-red-700 text-red-200 rounded-lg">
-                            <p className="font-semibold">Info</p>
-                            <p>{error}</p>
-                        </div>
-                    )}
+                    <div className="my-4 p-3 bg-yellow-900 border border-yellow-700 text-yellow-200 rounded-lg">
+                        <p className="font-semibold">Coming Soon!</p>
+                        <p className="text-sm">{error}</p>
+                    </div>
                     
-                    {!matchId ? (
-                        <div className="flex flex-col space-y-4">
-                            <input
-                                type="text"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                placeholder="Enter your username"
-                                className="p-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                            />
-                            <button
-                                onClick={handleFindMatch}
-                                disabled={loading}
-                                className="flex justify-center items-center p-4 bg-gradient-to-r from-emerald-400 to-cyan-400 text-gray-950 font-bold rounded-lg text-lg hover:opacity-90 transition-opacity disabled:opacity-50"
-                            >
-                                {loading ? <div className="loader" /> : "Find Match"}
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="text-center">
-                            <h3 className="text-xl">Match Found!</h3>
-                            <p className="text-gray-400">Match ID: {matchId}</p>
-                            <p className="my-4">Waiting for player...</p>
-                        </div>
-                    )}
+                    <div className="flex flex-col space-y-4 opacity-50">
+                        <input
+                            type="text"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            placeholder="Enter your username"
+                            disabled
+                            className="p-3 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                        />
+                        <button
+                            disabled
+                            className="p-4 bg-gray-700 text-gray-400 font-bold rounded-lg text-lg cursor-not-allowed"
+                        >
+                            Find Match (Coming Soon)
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function StatCard({ label, value }) {
+            return (
+                <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <p className="text-sm text-gray-400 mb-1">{label}</p>
+                    <p className="text-3xl font-bold text-white">{value}</p>
                 </div>
             );
         }
@@ -291,7 +326,7 @@
                         const data = await response.json();
                         setStats(data);
                     } catch (err) {
-                        setError("Stats backend not yet connected. Coming soon!");
+                        setError("Stats backend not yet connected.");
                         setStats({
                             uniqueVisitors: 0,
                             aiWinRate: 0,
@@ -307,7 +342,11 @@
             }, []);
 
             if (loading) {
-                return <div className="flex justify-center items-center p-10"><div className="loader" /></div>;
+                return (
+                    <div className="flex justify-center items-center p-10">
+                        <div className="loader"></div>
+                    </div>
+                );
             }
 
             return (
@@ -316,7 +355,7 @@
                     
                     {error && (
                         <div className="mb-4 p-3 bg-yellow-900 border border-yellow-700 text-yellow-200 rounded-lg">
-                            <p>{error}</p>
+                            <p className="text-sm">{error}</p>
                         </div>
                     )}
                     
@@ -345,105 +384,53 @@
                 </div>
             );
         }
-        
-        function StatCard({ label, value }) {
+
+        function App() {
+            const [page, setPage] = useState("playAI");
+
             return (
-                <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                    <p className="text-sm text-gray-400 mb-1">{label}</p>
-                    <p className="text-3xl font-bold text-white">{value}</p>
+                <div className="min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
+                    <Header />
+                    
+                    <nav className="flex space-x-2 bg-gray-900 p-2 rounded-lg my-6">
+                        <NavButton
+                            icon="brain"
+                            label="Play vs AI"
+                            isActive={page === "playAI"}
+                            onClick={() => setPage("playAI")}
+                        />
+                        <NavButton
+                            icon="swords"
+                            label="Play 1v1"
+                            isActive={page === "play1v1"}
+                            onClick={() => setPage("play1v1")}
+                        />
+                        <NavButton
+                            icon="bar-chart-3"
+                            label="Stats"
+                            isActive={page === "stats"}
+                            onClick={() => setPage("stats")}
+                        />
+                    </nav>
+
+                    <main className="w-full max-w-3xl">
+                        {page === "playAI" && <PlayAIPage />}
+                        {page === "play1v1" && <Play1v1Page />}
+                        {page === "stats" && <StatsPage />}
+                    </main>
                 </div>
             );
         }
 
-        function ChargeDisplay({ playerCharges, oppCharges, p1Label = "Your", p2Label = "Opponent" }) {
-            return (
-                <div className="flex justify-around items-center bg-gray-950 p-4 rounded-lg mb-6 border border-gray-700">
-                    <div className="text-center">
-                        <p className="text-lg font-semibold text-cyan-400">{p1Label} Charges</p>
-                        <p className="text-5xl font-bold text-white">{playerCharges}</p>
-                    </div>
-                    <div className="h-16 w-px bg-gray-700"></div>
-                    <div className="text-center">
-                        <p className="text-lg font-semibold text-emerald-400">{p2Label} Charges</p>
-                        <p className="text-5xl font-bold text-white">{oppCharges}</p>
-                    </div>
-                </div>
-            );
+        // Mount the app
+        try {
+            const root = createRoot(document.getElementById('root'));
+            root.render(<App />);
+            console.log("React app mounted successfully!");
+        } catch (error) {
+            console.error("Error mounting React app:", error);
+            document.getElementById('root').innerHTML = '<div style="color: white; padding: 20px;">Error loading app. Check console for details.</div>';
         }
-
-        function MoveSelector({ legalMoves, onMoveSelect, disabled }) {
-            const moveIcons = {
-                charge: { icon: "zap", color: "text-yellow-400" },
-                shield: { icon: "shield", color: "text-blue-400" },
-                fireball: { icon: "flame", color: "text-red-500" },
-                iceball: { icon: "snowflake", color: "text-cyan-300" },
-                megaball: { icon: "bomb", color: "text-purple-400" },
-            };
-
-            return (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {legalMoves.map(move => {
-                        const { icon, color } = moveIcons[move];
-                        return (
-                            <button
-                                key={move}
-                                onClick={() => onMoveSelect(move)}
-                                disabled={disabled}
-                                className={`flex flex-col items-center justify-center p-6 bg-gray-800 rounded-lg border border-gray-700 text-white font-semibold
-                                    hover:bg-gray-700 hover:border-gray-600 transition-all duration-200
-                                    focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-emerald-400
-                                    disabled:opacity-50 disabled:cursor-not-allowed`}
-                            >
-                                <Icon name={icon} className={`w-10 h-10 ${color} mb-2`} />
-                                {move.charAt(0).toUpperCase() + move.slice(1)}
-                            </button>
-                        );
-                    })}
-                </div>
-            );
-        }
-
-        function EndGameDisplay({ winner, onPlayAgain }) {
-            const isPlayerWin = winner === 'player1' || winner === 'human';
-            
-            return (
-                <div className="text-center p-6">
-                    <h3 className={`text-4xl font-bold ${isPlayerWin ? 'text-emerald-400' : 'text-red-500'}`}>
-                        {isPlayerWin ? "You Won!" : "You Lost!"}
-                    </h3>
-                    <button
-                        onClick={onPlayAgain}
-                        className="mt-6 px-6 py-3 bg-gradient-to-r from-emerald-400 to-cyan-400 text-gray-950 font-bold rounded-lg text-lg hover:opacity-90 transition-opacity"
-                    >
-                        Play Again
-                    </button>
-                </div>
-            );
-        }
-
-        function HistoryDisplay({ history }) {
-            if (history.length === 0) return null;
-            
-            return (
-                <div className="mt-8">
-                    <h3 className="text-xl font-semibold mb-4">Turn History</h3>
-                    <div className="space-y-3 max-h-60 overflow-y-auto p-4 bg-gray-950 rounded-lg border border-gray-700">
-                        {history.map((turn, i) => (
-                            <div key={i} className="flex justify-between items-center text-sm p-3 bg-gray-800 rounded">
-                                <div>
-                                    <p>You played <span className="font-bold text-cyan-400">{turn.player}</span></p>
-                                    <p>Opponent played <span className="font-bold text-emerald-400">{turn.ai}</span></p>
-                                </div>
-                                <span className="font-semibold text-gray-300">{turn.result}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        }
-
-        const root = createRoot(document.getElementById('root'));
-        root.render(<App />);
     </script>
 </body>
 </html>
